@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+</head>
+<body onload="startGame()" onkeypress="keyPressed(event)" onkeyup="keyUp()">
+<h1> Inverted Pendulum Demo </h1>
+<canvas id="gameCanvas" width="800" height="1200"></canvas>
+<script> 
+
+var img = new Image();   // Create new img element
+img.src = 'cart.png'; // Set source path
+var imgHeightWidthRatio = 0.68;
+
+var flameRightImg = new Image();
+flameRightImg.src = 'flameRight.png';
+
+var flameLeftImg = new Image();
+flameLeftImg.src = 'flameLeft.png';
+
+var time = 0;
+var id;
+var gameScreen;
+var mouseX;
+var mouseY;
+
+//Scale physical dimension to canvas
+var graphicScale = 500;
+
+var cart;
+
+
+var userAppliedForce = 0;
+var controllerOn = true;
+var readyToToggleController = true;
+var integral_theta = 0;
+var integral_x = 0;
+var setpoint_x = 0;
+
+var controllerScript = "";
+
+var currentTime;
+
+var deltaT = 1;
+
+function startGame() 
+{
+
+	//create cart
+	cart = {
+		mass: 0.5,
+		width: 0.2 * graphicScale,
+		xPos: 1000,
+		yPos: 150,	
+		x: 0, //center of mass = x,y
+		xDot: 0.0,
+		xDotDot: 0.0,
+		pendulum: {
+			mass: 0.2,
+			l: 0.3, // 0.5 meters
+			th: 0.0,
+			thDot: 0.0,
+			thDotDot: 0.0,
+			//x: 740, //same as cart
+			//y: 525 //100 above cart
+		}
+	};
+	cart.height = cart.width * imgHeightWidthRatio;
+	cart.centerX = cart.xPos + cart.width/2;
+	cart.y = cart.yPos + cart.height/2;
+	
+
+	canvas = document.getElementById('gameCanvas');
+	ctx = canvas.getContext('2d');
+	canvas.width = 2000;
+	canvas.height = 400;
+	gameScreen = {
+		canvas: canvas, 
+		ctx: ctx,
+		width: canvas.width,
+		height: canvas.height
+	};
+	
+	document.onmousemove = handleMouseMove;
+	
+	id = setInterval(draw, 1);
+}
+
+function draw()
+{
+	gameScreen.ctx.clearRect(0,0,gameScreen.width, gameScreen.height);
+	gameScreen.ctx.fillStyle = "white";
+	gameScreen.ctx.fillRect(0, 0, gameScreen.width, gameScreen.height)
+	time = time + 1;
+	if (time == 100000)
+	{
+		clearInterval(id);
+	}
+	
+	
+	solver();
+	
+	let cartYtop = gameScreen.height - cart.y - cart.height / 2;
+	let cartXtop = cart.x*graphicScale + cart.centerX - cart.width / 2;
+
+	gameScreen.ctx.drawImage(img, cartXtop, cartYtop, cart.width, cart.width*imgHeightWidthRatio);
+	
+	let x = graphicScale* cart.pendulum.l * Math.sin(cart.pendulum.th);
+	let y = graphicScale* cart.pendulum.l * Math.cos(cart.pendulum.th);
+
+	// draw pendulum
+	gameScreen.ctx.lineWidth = 5;
+	gameScreen.ctx.strokeStyle = 'black';
+    gameScreen.ctx.beginPath();
+    gameScreen.ctx.moveTo(cart.x*graphicScale + cart.centerX, cartYtop + cart.height / 2);
+    gameScreen.ctx.lineTo(cart.x*graphicScale + cart.centerX + x, cartYtop + cart.height / 2 - y);
+    gameScreen.ctx.stroke();
+	
+	// draw setpoint
+	gameScreen.ctx.strokeStyle = 'red';
+    gameScreen.ctx.beginPath();
+    gameScreen.ctx.moveTo(cart.xPos + cart.width/2 + setpoint_x*graphicScale, cartYtop - graphicScale*cart.pendulum.l);
+    gameScreen.ctx.lineTo(cart.xPos + cart.width/2 + setpoint_x*graphicScale, cartYtop - graphicScale*cart.pendulum.l - 10);
+    gameScreen.ctx.stroke();
+	
+	//draw ground
+	gameScreen.ctx.lineWidth = 2;
+	gameScreen.ctx.strokeStyle = 'green';
+    gameScreen.ctx.beginPath();
+    gameScreen.ctx.moveTo(0, cartYtop + cart.height);
+    gameScreen.ctx.lineTo(gameScreen.canvas.width, cartYtop + cart.height);
+    gameScreen.ctx.stroke();
+	
+}
+
+function handleMouseMove(event) 
+{
+	mouseX = event.pageX;
+	mouseY = event.pageY;
+}
+
+
+function solver()
+{
+	let F = 0;
+	let M = cart.mass;
+	let m = cart.pendulum.mass;
+	let l = cart.pendulum.l;
+	let g = 9.81;
+	let x1n;
+	let x2n;
+	let x3n;
+	let x4n;
+	let x1p = cart.pendulum.th;
+	let x2p = cart.pendulum.thDot;
+	let x3p = cart.x;
+	let x4p = cart.xDot;
+	let x2Dotp = cart.xDotDot;
+	let x4Dotp = cart.pendulum.thDotDot;
+	
+	let h = deltaT/1000;
+	
+	//PID controller (theta)
+	let Kp_th = 100;
+	let Kd_th = 20;
+	let Ki_th = 1;
+	let F_theta = Kp_th * x1p + Kd_th * x2p + Ki_th * integral_theta;
+	integral_theta = integral_theta + h*x1p;
+	
+	//PID controller (x)
+	let Kp_x = 50;
+	let Kd_x = 50;
+	let Ki_x = 0;
+	let F_x = Kp_x * (x3p-setpoint_x) + Kd_x * x4p + Ki_x * integral_x;
+	integral_x = integral_x + h*(x3p-setpoint_x);
+	if (Math.sign(integral_x) != Math.sign(x3p))
+	{
+		integral_x = 0;
+	}
+	
+	if (controllerOn)
+	{
+		F = F_theta + F_x;
+		//Read and parse user defined controller
+		eval(controllerScript);
+	}
+	else
+	{
+		F = userAppliedForce;
+	}
+	
+	//Controller saturation
+	if (Math.abs(F) > 20)
+	{
+		F = Math.sign(F)*20;
+	}
+	
+	
+	
+	
+	
+	//--------------DEPRECATED-------------------//
+	//Eulers method (linearized equations)
+	//x1n = x1p + h * x2p;
+	//x2n = x2p + h * ( x1p * ((M + m) / (M * l)) * g - (F / M * l) );   
+	//x3n = x3p + h * x4p;
+	//x4n = x4p + h * ( ( (-m)*g*x1p/M) + (F/M) ) ;  
+	//--------------DEPRECATED-------------------//
+
+	
+	// x1p = theta
+	// x2p = theta_dot
+	// x3p = x
+	// x4p = x_dot
+	
+	// Avoiding singularities (make sure no zeros in AXX's denominators)
+	if (x1p < 0.00001 && x1p > -0.00001)
+	{
+		x1p += 0.0001;
+	}
+	if (Math.sin(x1p) < 0.00001 && Math.sin(x1p) > -0.00001)
+	{
+		x1p += 0.0001;
+	}
+	if (x1p > Math.PI)
+	{
+		x1p -= 2*Math.PI;
+	}
+	if (x1p < -Math.PI)
+	{
+		x1p += 2*Math.PI;
+	}
+
+	
+	//Building equations on the form x_dot = A(x)*x + B(x)*u
+	let A11 = 0;
+	let A12 = 1;
+	let A13 = 0;
+	let A14 = 0;
+	
+	let A21 = ( (M + m) * g * Math.sin(x1p) ) / ( (M + m*Math.sin(x1p)*Math.sin(x1p)) * l * x1p );
+	let A22 = ( -1 * (m * Math.sin(x1p)*Math.cos(x1p)*x2p) ) / ( M + m*Math.sin(x1p)*Math.sin(x1p) );
+	let A23 = 0;
+	let A24 = 0;
+	
+	let A31 = 0;
+	let A32 = 0;
+	let A33 = 0;
+	let A34 = 1;
+	
+	let A41 = ( -1* m*g*Math.cos(x1p)*Math.sin(x1p) ) / ( (M + m*Math.sin(x1p)*Math.sin(x1p)) * x1p );
+	let A42 = ( m*l*Math.sin(x1p)*x2p ) / ( M + m*Math.sin(x1p)*Math.sin(x1p) );
+	let A43 = 0;
+	let A44 = 0;
+	
+	
+	let B1 = 0;
+	let B2 = -Math.cos(x1p) /
+			 ( (M + m*Math.sin(x1p)*Math.sin(x1p)) * l );
+	let B3 = 0;
+	let B4 = 1 /
+			 ( M + m*Math.sin(x1p)*Math.sin(x1p) );
+	
+	//Eulers method (non-linear equations)
+	x1n = x1p + h * ( ( A11*x1p + A12*x2p + A13*x3p + A14*x4p ) + B1*F );
+	x2n = x2p + h * ( ( A21*x1p + A22*x2p + A23*x3p + A24*x4p ) + B2*F );  
+	x3n = x3p + h * ( ( A31*x1p + A32*x2p + A33*x3p + A34*x4p ) + B3*F );
+	x4n = x4p + h * ( ( A41*x1p + A42*x2p + A43*x3p + A44*x4p ) + B4*F ); 
+	
+	//Update cart with new values
+	cart.pendulum.th = x1n;
+	cart.pendulum.thDot = x2n;
+	cart.x = x3n;
+	cart.xDot = x4n;
+
+	//update html
+	document.getElementById("xOutput").value = x3n.toFixed(4);
+	document.getElementById("xError").value = (x3n-setpoint_x).toFixed(4);
+	document.getElementById("xRefInput").value = setpoint_x.toFixed(4);
+	
+	//draw force flames
+	let fScale = 2;
+	let flameSize = (Math.pow(Math.abs(F), 1/3)*Math.sign(F)/fScale) + Math.sign(F)*0.2;
+	if (F < 0)
+	{
+		gameScreen.ctx.drawImage(flameRightImg, cart.centerX + cart.x*graphicScale + cart.width/2 - flameSize*100, gameScreen.height - cart.y - flameSize*30/2, flameSize*100,flameSize*30);
+	}
+	else if (F > 0)
+	{
+		gameScreen.ctx.drawImage(flameLeftImg, cart.centerX + cart.x*graphicScale - cart.width/2 - flameSize*100, gameScreen.height - cart.y - flameSize*30/2, flameSize*100,flameSize*30);
+	}
+	
+	//If controller is OFF, make setpoint_x follow cart
+	if (!controllerOn)
+	{
+		setpoint_x = cart.x;
+	}
+}
+
+function setTheta()
+{
+	let theta = parseFloat(document.getElementById("thetaInput").value);
+	cart.pendulum.th = theta;
+}
+function setThetaDot()
+{
+	let thetaDot = parseFloat(document.getElementById("thetaDotInput").value);
+	cart.pendulum.thDot = thetaDot;
+}
+function setXdot()
+{
+	let xDot = parseFloat(document.getElementById("xDotInput").value);
+	cart.xDot = xDot;
+}
+function setXref()
+{
+	let xRef = parseFloat(document.getElementById("xRefInput").value);
+	setpoint_x = xRef;
+}
+
+function keyPressed(event)
+{
+	let unicode= event.which;
+	if (controllerOn)
+	{
+		if (unicode == 97 || unicode == 65) //a and A
+		{
+			setpoint_x = setpoint_x - 0.01;
+		}
+		if (unicode == 100 || unicode == 68) //d and D
+		{
+			setpoint_x = setpoint_x + 0.01;
+		}
+	}
+	else
+	{
+		if (unicode == 97 || unicode == 65) //a and A
+		{
+			userAppliedForce = -3;
+		}
+		else if (unicode == 100 || unicode == 68) //d and D
+		{
+			userAppliedForce = 3;
+		}
+	}
+	if (unicode == 115 || unicode == 83) //s and S
+	{
+		if (readyToToggleController) 
+		{
+			toggleController();
+			readyToToggleController = false;
+		}
+	}
+}
+
+function keyUp()
+{
+	userAppliedForce = 0;
+	readyToToggleController = true;
+}
+
+function toggleController()
+{
+	controllerOn = !controllerOn;
+}
+
+function applyController()
+{
+	controllerScript = document.getElementById("userInput").value;
+}
+
+
+</script>
+<br>
+<table>
+	<tr>
+		<td><h2>Instructions</h2></td>
+		<td><h2>Write your own controller</h2></td>
+	</tr>
+		<td>
+			<p> <b> The s-key - </b> toggles automatic control of the cart.<br>
+			<b> Controller is <i>ON</i>: The a- and d-key - </b> moves the horizontal set point of the cart, indicated by red dot.<br>
+			<b> Controller is <i>OFF</i>: The a- and d-key - </b> controls the cart manually, by applying force to the cart.</p>
+			<button onmousedown="setTheta()">Set Theta:</button>
+			<input type="text" id="thetaInput" name="fname">
+			<button onmousedown="setThetaDot()">Set Theta_dot:</button>
+			<input type="text" id="thetaDotInput" name="fname"><br>
+			<button onmousedown="setXdot()">Set X_dot:</button>
+			<input type="text" id="xDotInput" name="fname"><br>
+			<p>X set point:<input type="text" id="xRefInput" name="fname"> X output:<input type="text" id="xOutput" name="fname">   X error:<input type="text" id="xError" name="fname"> <br></p>
+		</td>
+		<td>
+			<form><br>
+				<textarea id="userInput" spellcheck="false" rows = "20" cols = "100" name = "description">
+//Write code in javascript. You have access to the following variables:
+//x1p, x2p, x3p, x4p ==> theta, theta_dot, x, x_dot.
+//setpoint_x, h ==> the setpoint of x, sample interval.
+//Your code should end with assignment to the variable 'F' (e.g. F = Kp*(x3-x3_ref);) 
+
+//PID controller (theta)
+let Kp_th = 100;
+let Kd_th = 20;
+let Ki_th = 1;
+let F_theta = Kp_th * x1p + Kd_th * x2p + Ki_th * integral_theta;
+integral_theta = integral_theta + h*x1p;
+
+//PID controller (x)
+let Kp_x = 50;
+let Kd_x = 50;
+let Ki_x = 0;
+let F_x = Kp_x * (x3p-setpoint_x) + Kd_x * x4p + Ki_x * integral_x;
+integral_x = integral_x + h*(x3p-setpoint_x);
+
+F = F_theta + F_x;
+				</textarea><br>
+			</form>
+			<button onmousedown="applyController()"> Apply Controller code ...</button>
+		</td>
+</body>
+</html>
