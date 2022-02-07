@@ -32,6 +32,7 @@ var mouseY;
 var gameOn = false;
 var gameScore = 0.0;
 var alive = true;
+var nameGiven = false;
 
 //Scale physical dimension to canvas
 var graphicScale = 500;
@@ -206,6 +207,20 @@ function modifyGameScore()
     if (Math.abs(cart.pendulum.th) > Math.PI/2)
     {
         alive = false;
+		if (!nameGiven)
+		{
+			//prompt user for name for highscore list
+			let name = prompt("Please enter your name:", "Einar Dogger");
+			if (name == null || name == "") {
+				//dont save to db
+				nameGiven = true;
+			}
+			else
+			{
+				nameGiven = true;
+				saveScoreToDatabase(name);
+			}
+		}
     }
 }
 
@@ -457,6 +472,7 @@ function applyController()
 
 function playGame()
 {
+	nameGiven = false;
     controllerOn = false;
     gameOn = true;
     alive = true;
@@ -488,27 +504,25 @@ function letControllerPlay()
 
 }
 
-function saveScoreToDatabase() {
-	let playerName = document.getElementById("playerName").value;
+function saveScoreToDatabase(name) {
+	//let playerName = document.getElementById("playerName").value;
     $.ajax({
             type : "POST",  //type of method
             url  : "highscore.php",  //your page
-            data : { name : playerName, score : gameScore },// passing the values
+            data : { name : name, score : gameScore },// passing the values
             success: function(res){  
                                     //do what you want here...
                     }
         });
 }
     </script>
-    <br>
-	<label>Enter your name (for highscore):</label>
-	<input type="text" id="playerName" name="fname">
-	<button onmousedown="saveScoreToDatabase()">submit score</button>
-	<br>
     <button onmousedown="playGame()">Play Game</button>
     <button onmousedown="letControllerPlay()">Let CYBERNETICS do it!</button>
     <h2> Instructions </h2>
     <p> Control the cart using A- and D-keys. Click the "Play Game"-button to start. Try to balance the tip of the pendulum inside the red target square!</p>
+
+
+		
 
 
     <div style="display:none">
